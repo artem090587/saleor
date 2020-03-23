@@ -2850,6 +2850,20 @@ CREATE_INVOICE_MUTATION = """
 """
 
 
+REQUEST_DELETE_INVOICE_MUTATION = """
+    mutation RequestDeleteInvoice($id: ID!) {
+        requestDeleteInvoice(
+            id: $id
+        ) {
+            errors {
+                field
+                message
+            }
+        }
+    }
+"""
+
+
 DELETE_INVOICE_MUTATION = """
     mutation DeleteInvoice($id: ID!) {
         deleteInvoice(
@@ -2925,13 +2939,35 @@ def test_request_invoice_no_permissions(staff_api_client, orders):
 
 
 @mock.patch("saleor.extensions.base_plugin.BasePlugin.invoice_delete")
-def test_delete_invoice(plugin_mock, user_api_client, permission_manage_orders, orders):
+def test_request_delete_invoice(
+    plugin_mock, user_api_client, permission_manage_orders, orders
+):
+    invoice = Invoice.objects.create(order=orders[0])
+    variables = {"id": graphene.Node.to_global_id("Invoice", invoice.pk)}
+    user_api_client.user.user_permissions.add(permission_manage_orders)
+    user_api_client.post_graphql(REQUEST_DELETE_INVOICE_MUTATION, variables)
+    invoice.refresh_from_db()
+    assert invoice.status == InvoiceStatus.PENDING_DELETE
+    assert plugin_mock.called
+
+
+@mock.patch("saleor.extensions.base_plugin.BasePlugin.invoice_delete")
+def test_request_delete_invoice_no_permission(
+    plugin_mock, user_api_client, permission_manage_orders, orders
+):
+    invoice = Invoice.objects.create(order=orders[0])
+    variables = {"id": graphene.Node.to_global_id("Invoice", invoice.pk)}
+    response = user_api_client.post_graphql(REQUEST_DELETE_INVOICE_MUTATION, variables)
+    assert_no_permission(response)
+    assert not plugin_mock.called
+
+
+def test_delete_invoice(user_api_client, permission_manage_orders, orders):
     invoice = Invoice.objects.create(order=orders[0])
     variables = {"id": graphene.Node.to_global_id("Invoice", invoice.pk)}
     user_api_client.user.user_permissions.add(permission_manage_orders)
     user_api_client.post_graphql(DELETE_INVOICE_MUTATION, variables)
     assert not Invoice.objects.filter(id=invoice.pk).exists()
-    assert plugin_mock.called
 
 
 def test_delete_invoice_no_permissions(user_api_client, orders):
